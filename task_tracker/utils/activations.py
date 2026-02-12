@@ -7,47 +7,28 @@ import torch
 from tqdm import tqdm
 
 from task_tracker.models.model import Model
-from task_tracker.utils.data import format_prompts
+from task_tracker.utils.data import format_agentic_prompts, format_prompts
 
 current_dir = os.getcwd()
 parent_dir = os.path.dirname(current_dir)
 
 
-def get_last_token_activations_single(
-    text, model, start_layer: int = 1, token: int = -1
+def get_last_token_activations_chat(
+    messages, model, start_layer: int = 1, token: int = -1
 ):
     """
-    Process a single text to extract the last token activations from all layers.
+    Process a chat message list to extract the last token activations from all layers.
 
     Parameters:
-    - text (str): The text to process.
+    - messages (list): Chat messages in OpenAI-style format.
     - model: The pre-trained model from Hugging Face's Transformers.
-    - tokenizer: The tokenizer corresponding to the pre-trained model.
-    - model_name: The name of the model
 
     Returns:
     - Tensor of shape (num_layers, hidden_size) containing the last token activations.
     """
 
-    if "mistral" in model.name or "phi" in model.name:
-        chat = [
-            {
-                "role": "user",
-                "content": "you are a helpful assistant that will provide accurate answers to all questions. "
-                + text,
-            }
-        ]
-    else:
-        chat = [
-            {
-                "role": "system",
-                "content": "you are a helpful assistant that will provide accurate answers to all questions.",
-            },
-            {"role": "user", "content": text},
-        ]
-
     inputs = model.tokenizer.apply_chat_template(
-        chat, tokenize=True, add_generation_prompt=True, return_tensors="pt"
+        messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
     )
 
     with torch.no_grad():
@@ -69,11 +50,46 @@ def get_last_token_activations_single(
         end_layer = len(outputs["hidden_states"])
         last_tokens = []
         for i in range(start_layer, end_layer):
-            # print(f'Extracting last token from layer {i}/{end_layer - 1}')
             last_tokens.append(outputs["hidden_states"][i][:, token].cpu())
         last_token_activations = torch.stack(last_tokens)
 
     return last_token_activations.squeeze(1)
+
+
+def get_last_token_activations_single(
+    text, model, start_layer: int = 1, token: int = -1
+):
+    """
+    Process a single text to extract the last token activations from all layers.
+
+    Parameters:
+    - text (str): The text to process.
+    - model: The pre-trained model from Hugging Face's Transformers.
+
+    Returns:
+    - Tensor of shape (num_layers, hidden_size) containing the last token activations.
+    """
+
+    if "mistral" in model.name or "phi" in model.name:
+        messages = [
+            {
+                "role": "user",
+                "content": "you are a helpful assistant that will provide accurate answers to all questions. "
+                + text,
+            }
+        ]
+    else:
+        messages = [
+            {
+                "role": "system",
+                "content": "you are a helpful assistant that will provide accurate answers to all questions.",
+            },
+            {"role": "user", "content": text},
+        ]
+
+    return get_last_token_activations_chat(
+        messages, model, start_layer=start_layer, token=token
+    )
 
 
 def process_texts_in_batches(
@@ -195,6 +211,63 @@ def process_texts_in_batches_pairs(
         sanitized_output_filepath = re.sub(r"[^\x00-\x7F]+", "_", output_filepath)
 
         # Save this batch's activations to disk
+        try:
+            torch.save(hidden_batch, sanitized_output_filepath)
+            print(f"File saved successfully to {sanitized_output_filepath}")
+        except Exception as e:
+            logging.error(f"Failed to save file to {sanitized_output_filepath}: {e}")
+            print(f"An error occurred while saving the file: {e}")
+
+
+def process_texts_in_batches_agentic(
+    dataset_subset,
+    model: Model,
+    data_type: str,
+    sub_dir_name: str,
+    batch_size=1000,
+    with_priming: bool = True,
+    task_key: str = "task",
+    step_key: str = "step",
+):
+    """
+    Process agentic task+step texts in smaller batches and immediately write out each batch's activations.
+
+    Each batch stores a pair: [task_only, task_with_step].
+    """
+    if not os.path.exists(model.output_dir):
+        os.makedirs(model.output_dir)
+
+    output_subdir = os.path.join(model.output_dir, sub_dir_name)
+    if not os.path.exists(output_subdir):
+        os.makedirs(output_subdir)
+
+    for i in tqdm(range(0, len(dataset_subset), batch_size)):
+        batch_task, batch_task_with_step = format_agentic_prompts(
+            dataset_subset[i : i + batch_size],
+            with_priming,
+            task_key=task_key,
+            step_key=step_key,
+        )
+
+        hidden_batch_task = torch.stack(
+            [get_last_token_activations_single(text, model) for text in batch_task]
+        )
+        hidden_batch_task_with_step = torch.stack(
+            [
+                get_last_token_activations_single(text, model)
+                for text in batch_task_with_step
+            ]
+        )
+
+        hidden_batch = torch.stack([hidden_batch_task, hidden_batch_task_with_step])
+
+        time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filepath = os.path.join(
+            output_subdir, f"{data_type}_hidden_states_{i}_{i+batch_size}_{time_str}.pt"
+        )
+        print(output_filepath)
+        sanitized_output_filepath = re.sub(r"[^\x00-\x7F]+", "_", output_filepath)
+
         try:
             torch.save(hidden_batch, sanitized_output_filepath)
             print(f"File saved successfully to {sanitized_output_filepath}")

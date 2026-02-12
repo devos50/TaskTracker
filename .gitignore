@@ -3,3 +3,6 @@ _activations_old/*
 *.pyc
 *.egg-info
 .specstory/
+
+**.DS_Store
+.vscode/**

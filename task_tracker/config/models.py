@@ -72,6 +72,22 @@ mixtral = Model(
     torch_dtype=torch.float16,
 )
 
+gpt_oss_120b = Model(
+    name="openai/gpt-oss-120b",
+    output_dir=os.path.join(activation_parent_dir, "gpt_oss_120b"),
+    data=data,
+    subset="train",
+    torch_dtype=torch.bfloat16,
+)
+
+gpt_oss_20b = Model(
+    name="openai/gpt-oss-20b",
+    output_dir=os.path.join(activation_parent_dir, "gpt_oss_20b"),
+    data=data,
+    subset="train",
+    torch_dtype=torch.bfloat16,
+)
+
 # Dictionary of models for easy access
 models: Dict[str, Model] = {
     "llama3_70b": llama_3_70B,
@@ -79,4 +95,6 @@ models: Dict[str, Model] = {
     "mistral": mistral_7B,
     "phi3": phi3,
     "mixtral": mixtral,
+    "gpt_oss_120b": gpt_oss_120b,
+    "gpt_oss_20b": gpt_oss_20b,
 }

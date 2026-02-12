@@ -132,6 +132,31 @@ def format_prompts(documents, specific_user_prompt=""):
     return primary, primary_text
 
 
+def format_agentic_prompts(original_task, step_text):
+    """
+    Construct prompts for agentic drift detection: task-only and task+step.
+    """
+    eliciting_instructions = """ but first before you answer, please complete the following sentence by briefly writing each request(s) you received and you are going to execute next:  
+        "All requests that I am going to execute now are:" """
+
+    task_only = (
+        "here are your main requests: <MAIN> "
+        + original_task
+        + " </MAIN>"
+        + eliciting_instructions
+    )
+    task_with_step = (
+        "here are your main requests: <MAIN> "
+        + original_task
+        + " "
+        + step_text
+        + " </MAIN>"
+        + eliciting_instructions
+    )
+
+    return task_only, task_with_step
+
+
 def task_tracker_main(
     documents,
     llm,
@@ -155,3 +180,36 @@ def task_tracker_main(
     y_pred_prob = task_tracker_model.predict_proba(deltas)[:, 1]
 
     return y_pred_prob
+
+
+def task_drift_score_agentic(
+    original_task,
+    step_text,
+    llm,
+    llm_name,
+    tokenizer,
+    layer,
+    distance="l2",
+):
+    """
+    Computes a drift score for an agentic step without a poisoned/clean classifier.
+
+    Returns a single float score. Larger values indicate more drift.
+    """
+    task_only, task_with_step = format_agentic_prompts(original_task, step_text)
+
+    task_only_activations = get_last_token_activations(
+        task_only, llm_name, layer, llm, tokenizer
+    )
+    task_with_step_activations = get_last_token_activations(
+        task_with_step, llm_name, layer, llm, tokenizer
+    )
+
+    delta = (task_with_step_activations - task_only_activations).float()
+    if distance == "cosine":
+        score = 1 - torch.nn.functional.cosine_similarity(
+            task_only_activations, task_with_step_activations, dim=-1
+        )
+        return score.item()
+
+    return torch.norm(delta, p=2).item()
