@@ -42,6 +42,11 @@ def main():
         description="Generate activations for GAIA agentic tasks."
     )
     parser.add_argument("--model-name", default="phi3")
+    parser.add_argument(
+        "--config",
+        default="2023_all",
+        help="GAIA dataset config name (e.g., 2023_all, 2023_level1).",
+    )
     parser.add_argument("--split", default="test")
     parser.add_argument("--max-items", type=int, default=0)
     parser.add_argument("--with-priming", action="store_true")
@@ -66,7 +71,7 @@ def main():
     model.model = loaded_model["model"]
     model.model.eval()
 
-    dataset = load_dataset("gaia-benchmark/GAIA", split=args.split)
+    dataset = load_dataset("gaia-benchmark/GAIA", args.config, split=args.split)
 
     items = _build_agentic_items(
         dataset, text_field=args.text_field, max_items=args.max_items
